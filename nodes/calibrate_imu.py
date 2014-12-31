@@ -1,6 +1,4 @@
 #!/usr/bin/env python2
-
-import roslib; roslib.load_manifest('calibrate_imu')
 import rospy
 from std_msgs.msg import Header
 from sensor_msgs.msg import Imu
@@ -18,6 +16,8 @@ class calibrate_imu:
         self.__location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
         self.mag_samples = []
         self.imu_samples = []
+        self.mag_matrix = eye(3)
+        self.mag_offset = zeros(3)
         self.sampling = False
         mag_topic = rospy.get_param('~mag_topic', '/imu/mag')
         imu_topic = rospy.get_param('~imu_topic', '/imu/data')
@@ -25,6 +25,10 @@ class calibrate_imu:
         rospy.Subscriber(imu_topic,Imu, self.imu_cb)
         rospy.Service('start_sampling',Empty,self.start_sampling)
         rospy.Service('calibrate_mag',Empty,self.calibrate_mag)
+
+
+        self.publish_calibrated = rospy.get_param("publish_calibrated", False)
+        self.calibrated_mag_pub = rospy.Publisher('/imu/mag_calibrated',Vector3Stamped, queue_size='1')
         rospy.spin()
         pass
 
@@ -35,7 +39,18 @@ class calibrate_imu:
              self.mag_samples.append([data.vector.x,data.vector.y,data.vector.z])
              if len(self.mag_samples)%50==0:
                  rospy.loginfo("Got %d magnetometer readings"%(len(self.mag_samples)))
-        pass
+
+        if self.publish_calibrated == True:
+            mag_raw = array([data.vector.x,data.vector.y,data.vector.z])
+            mag_cal = ((self.mag_matrix.dot((self.mag_raw-self.mag_offset.T).T)).T)
+            calibrated_mag_msg = Vector3Stamped()
+
+            calibrated_mag_msg.header.stamp = data.header.stamp
+            calibrated_mag_msg.vector.x = mag_cal[0]
+            calibrated_mag_msg.vector.y = mag_cal[1]
+            calibrated_mag_msg.vector.z = mag_cal[2]
+
+            self.calibrated_mag_pub.publish(calibrated_mag_msg)
 
     def imu_cb(self,data):
         pass
@@ -101,13 +116,19 @@ class calibrate_imu:
             rospy.loginfo("Magnetometer offset:\n %s",x0)
             rospy.loginfo("Magnetometer Calibration Matrix:\n %s",L)
 
-            calib_name = strftime("mag_calibration_%d_%m_%y_%H_%M_%S",localtime())
-            f= open(os.path.join(self.__location__,calib_name),"w+")
+
+            f = open(os.path.join(self.__location__,"last_mag_calibration"),"w+")
             pickle.dump(x0,f)
             pickle.dump(L,f)
             pickle.dump(matrix(self.mag_samples),f)
             f.close()
+            # back up calibration
+            calib_name = strftime("old_calibrations/mag_calibration_%d_%m_%y_%H_%M_%S",localtime())
+            calib_path = os.path.join(self.__location__,calib_name)
+            os.system("cp last_mag_calibration %s"%(calib_path))
 
+            self.mag_matrix = L
+            self.mag_offset = x0
         else:
             rospy.loginfo("Not enough samples to calibrate the magnetometer")
         return EmptyResponse()
