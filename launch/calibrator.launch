@@ -1,0 +1,9 @@
+<launch>
+  <node pkg="calibrate_imu" type="calibrate_imu.py" name="mag_calibrator" output="screen">
+    <param name="publish_calibrated" value="true" />
+    <param name="max_samples" value="5000" />
+    <param name="calibrations_dir" value="$(find calibrate_imu)/data" />
+  </node>
+</launch>
+
+
