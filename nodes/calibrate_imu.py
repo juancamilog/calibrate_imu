@@ -1,7 +1,6 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 import rospy
-from std_msgs.msg import Header
-from sensor_msgs.msg import Imu
+from sensor_msgs.msg import Imu, MagneticField
 from geometry_msgs.msg import Vector3Stamped
 from std_srvs.srv import Empty, EmptyResponse
 import math
@@ -21,13 +20,13 @@ class calibrate_imu:
 
         mag_topic = rospy.get_param('~mag_topic', '/imu/mag')
         imu_topic = rospy.get_param('~imu_topic', '/imu/data')
-        self.publish_calibrated = rospy.get_param("~publish_calibrated", False)
+        self.publish_calibrated = rospy.get_param("~publish_calibrated", True)
         self.max_samples = rospy.get_param("~max_samples", 5000)
         self.__location__ = rospy.get_param("~calibrations_dir", "/data/mag_calibration")
-        self.calibrated_mag_pub = rospy.Publisher('/imu/mag_calibrated',Vector3Stamped, queue_size='1')
+        self.calibrated_mag_pub = rospy.Publisher('/imu/mag_calibrated', MagneticField, queue_size=1)
         self.load_calibration()
 
-        rospy.Subscriber(mag_topic,Vector3Stamped,self.mag_cb)
+        rospy.Subscriber(mag_topic,MagneticField,self.mag_cb)
         rospy.Subscriber(imu_topic,Imu, self.imu_cb)
         rospy.Service('start_sampling',Empty,self.start_sampling)
         rospy.Service('stop_sampling',Empty,self.stop_sampling)
@@ -42,7 +41,7 @@ class calibrate_imu:
             self.mag_samples = pickle.load(f)
             f.close()
         except:
-            rospy.log_error("Could not open file %s"%(file_path))
+            rospy.logerr("Could not open file %s"%(file_path))
 
         rospy.loginfo("Magnetometer offset:\n %s",self.mag_offset)
         rospy.loginfo("Magnetometer Calibration Matrix:\n %s",self.mag_matrix)
@@ -51,7 +50,8 @@ class calibrate_imu:
     def mag_cb(self,data):
         if self.sampling == True:
              #collect measurements
-             self.mag_samples.append([data.vector.x,data.vector.y,data.vector.z])
+             self.mag_samples.append([data.magnetic_field.x,data.magnetic_field.y,data.magnetic_field.z])
+
              if len(self.mag_samples)%50==0:
                  rospy.loginfo("Got %d magnetometer readings"%(len(self.mag_samples)))
              if len(self.mag_samples) > self.max_samples:
@@ -59,13 +59,13 @@ class calibrate_imu:
                  self.mag_samples = self.mag_samples[50:]
 
         if self.publish_calibrated == True:
-            mag_raw = array([data.vector.x,data.vector.y,data.vector.z])
+            mag_raw = array([data.magnetic_field.x,data.magnetic_field.y,data.magnetic_field.z])
             mag_cal = ((self.mag_matrix.dot((mag_raw-self.mag_offset.T).T)).T)
-            calibrated_mag_msg = Vector3Stamped()
+            calibrated_mag_msg = MagneticField()
             calibrated_mag_msg.header.stamp = data.header.stamp
-            calibrated_mag_msg.vector.x = mag_cal[0]
-            calibrated_mag_msg.vector.y = mag_cal[1]
-            calibrated_mag_msg.vector.z = mag_cal[2]
+            calibrated_mag_msg.magnetic_field.x = mag_cal[0]
+            calibrated_mag_msg.magnetic_field.y = mag_cal[1]
+            calibrated_mag_msg.magnetic_field.z = mag_cal[2]
 
             self.calibrated_mag_pub.publish(calibrated_mag_msg)
 
@@ -132,23 +132,27 @@ class calibrate_imu:
             L = eye(3)
             try:
                 L = linalg.cholesky(Q).transpose()
-            except Exception,e:
+            except Exception as e:
                 rospy.loginfo(str(e))
                 L = eye(3)
 
             rospy.loginfo("Magnetometer offset:\n %s",x0)
             rospy.loginfo("Magnetometer Calibration Matrix:\n %s",L)
 
-            file_path = os.path.join(self.__location__,"last_mag_calibration")
-            f = open(file_path,"w+")
-            pickle.dump(x0,f)
-            pickle.dump(L,f)
-            pickle.dump(matrix(self.mag_samples),f)
-            f.close()
-            # back up calibration
-            calib_name = strftime("mag_calibration_%d_%m_%y_%H_%M_%S",localtime())
-            calib_path = os.path.join(self.__location__,calib_name)
-            os.system("cp %s %s"%(file_path,calib_path))
+            # I don't personally need this, but if you want to re-enable it you will need there's a little debugging involved. 
+            # the following error comes up running under ros noetic
+            # [ERROR] [1697934881.719477]: Error processing request: [Errno 2] No such file or directory: '/data/mag_calibration/last_mag_calibration' ['Traceback (most recent call last):\n', '  File "/opt/ros/noetic/lib/python3/dist-packages/rospy/impl/tcpros_service.py", line 633, in _handle_request\n    response = convert_return_to_response(self.handler(request), self.response_class)\n', '  File "/home/matthew/catkin_ws/src/calibrate_imu/nodes/calibrate_imu.py", line 143, in calibrate_mag\n    f = open(file_path,"w+")\n', "FileNotFoundError: [Errno 2] No such file or directory: '/data/mag_calibration/last_mag_calibration'\n"]
+
+            # file_path = os.path.join(self.__location__,"last_mag_calibration")
+            # f = open(file_path,"w+")
+            # pickle.dump(x0,f)
+            # pickle.dump(L,f)
+            # pickle.dump(matrix(self.mag_samples),f)
+            # f.close()
+            # # back up calibration
+            # calib_name = strftime("mag_calibration_%d_%m_%y_%H_%M_%S",localtime())
+            # calib_path = os.path.join(self.__location__,calib_name)
+            # os.system("cp %s %s"%(file_path,calib_path))
 
             self.mag_matrix = L
             self.mag_offset = squeeze(array(x0))
