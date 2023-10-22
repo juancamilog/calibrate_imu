@@ -28,3 +28,6 @@ To visualize the raw data from the magnetometer and the calibrated data
 ``` -->
 
 If you have any questions or comments, please shoot me at email at gamboa at cim dot mcgill dot ca
+
+# Limitations
+This branch does not save the resulting configuration, it is only printed to the terminal, you will need to perform the adjustment in another node such as the `imu_filter_madwick` from the `imu_tools` package. 
